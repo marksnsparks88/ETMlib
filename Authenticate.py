@@ -4,10 +4,30 @@ import secrets
 import urllib
 import requests
 import sys
+import os
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError, JWTClaimsError
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import re
 
 client_id="ff320ee128f54bfb8a7c3fbf6b55e467"
+loginUrl="https://login.eveonline.com/oauth/"
+
+hostName = "localhost"
+serverPort = 8080
+
+class MyServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        global auth_code
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(bytes("<html><head><title>https://pythonbasics.org</title></head>", "utf-8"))
+        self.wfile.write(bytes("<p>Request: %s</p>" % self.path, "utf-8"))
+        self.wfile.write(bytes("<body>", "utf-8"))
+        self.wfile.write(bytes("<p>This is an example web server.</p>", "utf-8"))
+        self.wfile.write(bytes("</body></html>", "utf-8"))
+        auth_code = self.path
 
 def validate_eve_jwt(jwt_token):
 
@@ -138,8 +158,10 @@ def handle_sso_token_response(sso_response):
         print("\nSSO response JSON is: {}".format(sso_response.json()))
         
 def main(client_id):
+    run = 1
+    global auth_code
+    webServer = HTTPServer((hostName, serverPort), MyServer)
 
-    # Generate the PKCE code challenge
     random = base64.urlsafe_b64encode(secrets.token_bytes(32))
     m = hashlib.sha256()
     m.update(random)
@@ -149,8 +171,16 @@ def main(client_id):
     client_id = client_id
 
     print_auth_url(client_id, code_challenge=code_challenge)
-
-    auth_code = input("Copy the \"code\" query parameter and enter it here: ")
+    while run == 1:
+        webServer.handle_request()
+        auth_code = re.sub("\/\?code=", "", auth_code)
+        auth_code = re.sub("&state=unique-state", "", auth_code)
+        print(auth_code)
+        if auth_code:
+            run = 0
+            
+    webServer.server_close()
+    #auth_code = input("Copy the \"code\" query parameter and enter it here: ")
 
     code_verifier = random
 
