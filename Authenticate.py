@@ -4,6 +4,7 @@ import secrets
 import urllib
 import requests
 import sys
+import os
 import sqlite3
 from jose import jwt
 from Callback_server import Callback_Server
@@ -86,13 +87,10 @@ class OAuth():
                 db_character_id = c.execute("SELECT character_id FROM OAuth WHERE character_id = ?", ([character_id_])).fetchall()[0][0]
             except IndexError:
                 db_character_id = 0
-            print(character_id_, db_character_id)
             if int(character_id_) != int(db_character_id):
-                print('a')
                 c.execute("INSERT INTO OAuth VALUES (?, ?, ?, ?)", params)
                 db.commit()
             elif int(character_id_) == int(db_character_id):
-                print('b')
                 c.execute("UPDATE OAuth SET access_token = ?, refresh_token = ? WHERE character_id = ?", [data["access_token"], data["refresh_token"], character_id_])
                 db.commit()
             c.close()
@@ -102,7 +100,6 @@ class OAuth():
         db = sqlite3.connect(self.dbfile)
         c = db.cursor()
         refresh_token = c.execute("SELECT refresh_token FROM OAuth WHERE character_name = ?", ([character_name])).fetchall()[0][0]
-        print(refresh_token)
         headers = {"Content-Type": "application/x-www-form-urlencoded",
                     "Host": "login.eveonline.com"}
         form_values = {"grant_type": "refresh_token",
@@ -111,7 +108,6 @@ class OAuth():
                         "scope": self.scopes,}
         response = requests.post(self.token, data=form_values, headers=headers)
         if response.status_code == 200:
-            print('a')
             data = response.json()
             
             
@@ -123,18 +119,29 @@ class OAuth():
 
 if __name__ == "__main__":
     auth = OAuth()
-    auth_data = auth.authenticate()
+    character = 'Threon en Gravonere'
+    if os.path.exists(auth.dbfile):
+        auth.refresh(character)
+    else:
+        auth.authenticate()
+    
+    db = sqlite3.connect(auth.dbfile)
+    c = db.cursor()
+    
+    data = c.execute("SELECT character_id, character_name, access_token, refresh_token FROM OAuth").fetchall()
+    print(data[0][0])
             
     #------#
-    blueprint_path = ("https://esi.evetech.net/latest/characters/{}/blueprints/".format(auth_data['character_id']))
+    blueprint_path = ("https://esi.evetech.net/latest/characters/{}/blueprints/".format(data[0][0]))
     
-    orders_path = ("https://esi.evetech.net/latest/characters/{}/orders/".format(auth_data['character_id']))
+    orders_path = ("https://esi.evetech.net/latest/characters/{}/orders/".format(data[0][0]))
     
     path = orders_path
 
-    headers = {"Authorization": "Bearer {}".format(auth_data['access_token'])}
+    headers = {"Authorization": "Bearer {}".format(data[0][2])}
 
     res = requests.get(path, headers=headers)
 
-    data = res.json()
+    for i in res.json():
+        print(i)
     
