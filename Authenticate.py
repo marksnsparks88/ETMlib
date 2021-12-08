@@ -4,10 +4,8 @@ import secrets
 import urllib
 import requests
 import sys
-import os
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError, JWTClaimsError
-import re
 from Callback_server import Callback_Server
 
 client_id="ff320ee128f54bfb8a7c3fbf6b55e467"
@@ -17,7 +15,6 @@ loginUrl="https://login.eveonline.com/oauth/"
 
 
 def validate_eve_jwt(jwt_token):
-
     jwk_set_url = "https://login.eveonline.com/oauth/jwks"
 
     res = requests.get(jwk_set_url)
@@ -61,9 +58,7 @@ def validate_eve_jwt(jwt_token):
                   "https://login.eveonline.com: {}".format(str(e)))
             sys.exit(1)
 
-
 def print_auth_url(client_id, code_challenge=None):
-
     base_auth_url = "https://login.eveonline.com/v2/oauth/authorize/"
     params = {"response_type": "code",
                 "redirect_uri": "http://localhost:8080",
@@ -79,7 +74,6 @@ def print_auth_url(client_id, code_challenge=None):
     full_auth_url = "{}?{}".format(base_auth_url, string_params)
 
     print(full_auth_url)
-
 
 def send_token_request(form_values, add_headers={}):
     headers = {"Content-Type": "application/x-www-form-urlencoded",
@@ -100,9 +94,7 @@ def send_token_request(form_values, add_headers={}):
 
     return res
 
-
 def handle_sso_token_response(sso_response):
-
     if sso_response.status_code == 200:
         data = sso_response.json()
         access_token = data["access_token"]
@@ -145,14 +137,11 @@ def handle_sso_token_response(sso_response):
         print("\nSSO response JSON is: {}".format(sso_response.json()))
         
 def main(client_id):
-
     random = base64.urlsafe_b64encode(secrets.token_bytes(32))
     m = hashlib.sha256()
     m.update(random)
     d = m.digest()
     code_challenge = base64.urlsafe_b64encode(d).decode().replace("=", "")
-
-    client_id = client_id
 
     print_auth_url(client_id, code_challenge=code_challenge)
             
@@ -172,7 +161,6 @@ def main(client_id):
     res = send_token_request(form_values)
 
     handle_sso_token_response(res)
-
 
 if __name__ == "__main__":
     main(client_id)
