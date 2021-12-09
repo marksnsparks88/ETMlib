@@ -1,0 +1,8 @@
+esi_root = "https://esi.evetech.net/latest"
+assets = esi_root+"/characters/{}/assets/"
+blueprint = esi_root+"/characters/{}/blueprints/"
+orders = esi_root+"/characters/{}/orders/"
+balance = esi_root+"/characters/{}/wallet/"
+journal = esi_root+"/characters/{}/wallet/journal"
+transactions = esi_root+"/characters/{}/wallet/transactions"
+type_info = esi_root+"/universe/types/{}"
