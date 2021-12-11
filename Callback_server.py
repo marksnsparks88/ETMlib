@@ -18,14 +18,15 @@ class MyServer(BaseHTTPRequestHandler):
 class Callback_Server():
     def __init__(self, hostName, serverPort):
         self.webServer = HTTPServer((hostName, serverPort), MyServer)
+        print("http://"+hostName+":"+str(serverPort))
         run = True
         while run:
             self.webServer.handle_request()
             if "/?code=" in auth_code:
                 run = False
                 self.webServer.server_close()
-                self.code = re.sub("\/\?code=", "", auth_code)
-                self.code = re.sub("&state=unique-state", "", self.code)
+                self.code = re.findall("(?:=)(.*?)(?:&)", auth_code)[0]
+
         
         
 if __name__ == "__main__":
