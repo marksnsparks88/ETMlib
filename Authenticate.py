@@ -15,7 +15,7 @@ from Callback_server import Callback_Server
 class OAuth():
     def __init__(self):
         self.client_id="ff320ee128f54bfb8a7c3fbf6b55e467"
-        self.scopes="esi-characters.read_blueprints.v1 esi-markets.read_character_orders.v1"
+        self.scopes="publicData esi-location.read_location.v1 esi-location.read_ship_type.v1 esi-skills.read_skills.v1 esi-skills.read_skillqueue.v1 esi-wallet.read_character_wallet.v1 esi-clones.read_clones.v1 esi-bookmarks.read_character_bookmarks.v1 esi-assets.read_assets.v1 esi-planets.manage_planets.v1 esi-fittings.read_fittings.v1 esi-markets.structure_markets.v1 esi-characters.read_loyalty.v1 esi-characters.read_medals.v1 esi-characters.read_standings.v1 esi-characters.read_agents_research.v1 esi-industry.read_character_jobs.v1 esi-markets.read_character_orders.v1 esi-characters.read_blueprints.v1 esi-characters.read_corporation_roles.v1 esi-location.read_online.v1 esi-contracts.read_character_contracts.v1 esi-clones.read_implants.v1 esi-characters.read_fatigue.v1 esi-characters.read_notifications.v1 esi-markets.read_corporation_orders.v1 esi-industry.read_character_mining.v1 esi-planets.read_customs_offices.v1 esi-characters.read_titles.v1 esi-alliances.read_contacts.v1 esi-characters.read_fw_stats.v1 esi-characterstats.read.v1"
         
         self.EveLogin="https://login.eveonline.com"
         self.aurthorize=self.EveLogin+"/v2/oauth/authorize/"
@@ -26,9 +26,10 @@ class OAuth():
         self.serverPort=8080
         self.callback_url="http://"+self.hostName+":"+str(self.serverPort)
         
-        self.dbfile ="data.db"
+        self.dbfile ="OAuth.db"
         
     def authenticate(self):
+        print("authenticating")
         db = sqlite3.connect(self.dbfile)
         random = base64.urlsafe_b64encode(secrets.token_bytes(32))
         m = hashlib.sha256()
@@ -97,6 +98,7 @@ class OAuth():
             db.close()
         
     def refresh(self, character_name):
+        print("refreshing")
         db = sqlite3.connect(self.dbfile)
         c = db.cursor()
         refresh_token = c.execute("SELECT refresh_token FROM OAuth WHERE character_name = ?", ([character_name])).fetchall()[0][0]
@@ -119,29 +121,20 @@ class OAuth():
 
 if __name__ == "__main__":
     auth = OAuth()
-    character = 'Threon en Gravonere'
-    if os.path.exists(auth.dbfile):
-        auth.refresh(character)
-    else:
-        auth.authenticate()
+    auth.authenticate()
     
     db = sqlite3.connect(auth.dbfile)
     c = db.cursor()
     
     data = c.execute("SELECT character_id, character_name, access_token, refresh_token FROM OAuth").fetchall()
-    print(data[0][0])
-            
-    #------#
-    blueprint_path = ("https://esi.evetech.net/latest/characters/{}/blueprints/".format(data[0][0]))
     
-    orders_path = ("https://esi.evetech.net/latest/characters/{}/orders/".format(data[0][0]))
-    
-    path = orders_path
-
     headers = {"Authorization": "Bearer {}".format(data[0][2])}
-
-    res = requests.get(path, headers=headers)
-
-    for i in res.json():
-        print(i)
+    print(data[0][0], data[0][1])
     
+      
+
+
+
+
+
+
