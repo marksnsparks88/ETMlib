@@ -1,6 +1,7 @@
 import requests
 import sqlite3
 import os, re
+import json
 
 response = requests.get("https://esi.evetech.net/latest/markets/groups/?datasource=tranquility")
 market_group_ids=response.json()
@@ -84,7 +85,7 @@ for i in system_ids:
                 f.write("\n")
             print(" Recieved {} out of 8485".format(len(system_info)), end="\r")
         else:
-            print("Group {} skipped with error code {}".format(i, system_request.status_code))
+            print("System {} skipped with error code {}".format(i, system_request.status_code))
 
 #download station info
 if os.path.exists('station_info_tmp.json'):
@@ -111,7 +112,7 @@ for i in system_info:
                     f.write("\n")
                 print(" Recieved {} out of 5144".format(len(station_info)), end="\r")
             else:
-                print("Group {} skipped with error code {}".format(i, station_request.status_code))
+                print("Station {} skipped with error code {}".format(i, station_request.status_code))
                 
 #download constellation info
 response = requests.get("https://esi.evetech.net/latest/universe/constellations/?datasource=tranquility")
@@ -134,12 +135,12 @@ for i in constellation_ids:
         constellation_request = requests.get(url)
         if constellation_request.status_code == 200:
             constellation_info.append(constellation_request.json())
-            with open('constellation_info.json', 'a') as f:
+            with open('constellation_info_tmp.json', 'a') as f:
                 f.write(constellation_request.text)
                 f.write("\n")
             print(" Recieved {} out of 1174".format(len(constellation_info)), end="\r")
         else:
-            print("Group {} skipped with error code {}".format(i, constellation_request.status_code))
+            print("Constellation {} skipped with error code {}".format(i, constellation_request.status_code))
 
 #download region info
 response = requests.get("https://esi.evetech.net/latest/universe/regions/?datasource=tranquility")
@@ -162,38 +163,126 @@ for i in region_ids:
         region_request = requests.get(url)
         if region_request.status_code == 200:
             region_info.append(region_request.json())
-            with open('region_info.json', 'a') as f:
+            with open('region_info_tmp.json', 'a') as f:
                 f.write(region_request.text)
                 f.write("\n")
             print(" Recieved {} out of 112".format(len(region_info)), end="\r")
         else:
-            print("Group {} skipped with error code {}".format(i, region_request.status_code))
+            print("Region {} skipped with error code {}".format(i, region_request.status_code))
 
+create_table('market_group_info', market_group_info, 'eve-data.db')
+add_data('market_group_info', market_group_info, 'eve-data.db')
+
+create_table('market_type_info', market_type_info, 'eve-data.db')
+add_data('market_type_info', market_type_info, 'eve-data.db')
+
+create_table('station_info', station_info, 'eve-data.db')
+add_data('station_info', station_info, 'eve-data.db')
+
+create_table('system_info',system_info, 'eve-data.db')
+add_data('system_info', system_info, 'eve-data.db')
+
+create_table('constellation_info', constellation_info, 'eve-data.db')
+add_data('constellation_info', constellation_info, 'eve-data.db')
+
+create_table('region_info', region_info)
+add_data('region_info', region_info, 'eve-data.db')
+
+def get_table_headers(list_):
+    keys = list(list_[0].keys())
+    kt = {}
+    for i in range(1, len(list_)):
+        new_keys = list_[i].keys()
+        for k in new_keys:
+            if k not in keys:
+                keys.append(k)
+        for k in keys:
+            if k not in kt:
+                try:
+                    type_ = type(list_[i][k]).__name__
+                except KeyError:
+                    continue
+                if type_ == 'list' or type_ == 'dict':
+                    type_ = 'TEXT'
+                elif type_ == 'int':
+                    type_ = 'INTEGER'
+                elif type_ == 'str':
+                    type_ = 'TEXT'
+                elif type_ == 'bool':
+                    type_ = 'TEXT'
+                elif type_ == 'float':
+                    type_ = 'REAL'
+                kt[k] = type_
+    header = ''
+    for k, t in kt.items():
+        header = header+"{} {}, ".format(k, t)
+    return header[:-2]
+
+def create_table(name, list_, db_file):
+    db = sqlite3.connect(db_file)
+    cur = db.cursor()
+    create_table = 'CREATE TABLE IF NOT EXISTS {} ( {} );'
+    create_table.format(name, get_table_headers(list_))
+    create_table = create_table.format(name, get_table_headers(list_))
+    cur.execute(create_table)
+    db.commit()
+    cur.close()
+    db.close()
+
+def add_data(name, list_, db_file):
+    db = sqlite3.connect(db_file)
+    cur = db.cursor()
+    cur.execute("SELECT * FROM {} WHERE 1=0".format(name))
+    columns = [c[0] for c in cur.description]
+    line={}
+    cols = "?,"*len(columns)
+    cmd = "INSERT INTO {} VALUES ({})".format(name, cols[:-1])
+    for i in range(len(list_)):
+        line = list_[i]
+        for k, v in line.items():
+            type_ = type(v).__name__
+            if type_ == 'bool':
+                line[k] = str(v)
+            elif type_ == 'list':
+                line[k] = str(line[k])[1:-1].replace(" ", "")
+            elif type_ == 'dict':
+                line[k] = str(line[k]).replace("\'", "\"")
+        for c in columns:
+            if c not in line.keys():
+                line[c] = None
+        params = []
+        for c in columns:
+            params.append(line[c])
+        cur.execute(cmd, params)
+        db.commit()
+    cur.close()
+    db.close()
+
+
+
+print()
 #remove un-needed item info
-for i in market_type_info:
-    if 'dogma_attributes' in i.keys():
-        del i['dogma_attributes']
-    if 'dogma_effects' in i.keys():
-        del i['dogma_effects']
+#for i in market_type_info:
+    #if 'dogma_attributes' in i.keys():
+        #del i['dogma_attributes']
+    #if 'dogma_effects' in i.keys():
+        #del i['dogma_effects']
 
 #create child group list
-for i in range(len(market_group_info)):
-    if 'child_groups' not in market_group_info[i].keys():
-        market_group_info[i]['child_groups']=[]
-    for j in range(len(market_group_info)):
-        if 'parent_group_id' in market_group_info[j].keys():
-            if market_group_info[j]['parent_group_id'] == market_group_info[i]['market_group_id']:
-                market_group_info[i]['child_groups'].append(market_group_info[j]['market_group_id'])
+#for i in range(len(market_group_info)):
+    #if 'child_groups' not in market_group_info[i].keys():
+        #market_group_info[i]['child_groups']=[]
+    #for j in range(len(market_group_info)):
+        #if 'parent_group_id' in market_group_info[j].keys():
+            #if market_group_info[j]['parent_group_id'] == market_group_info[i]['market_group_id']:
+                #market_group_info[i]['child_groups'].append(market_group_info[j]['market_group_id'])
 
 #merge lists into strings for database
-for i in range(len(market_group_info)):
-    for k, v in market_group_info[i].items():
-        if type(v).__name__ == 'list':
-            if len(v) == 0:
-                market_group_info[i][k] = None
-            else:
-                liststr = [str(n) for n in v]
-                market_group_info[i][k] = ' '.join(liststr)
-                
-
-
+#for i in range(len(market_group_info)):
+    #for k, v in market_group_info[i].items():
+        #if type(v).__name__ == 'list':
+            #if len(v) == 0:
+                #market_group_info[i][k] = None
+            #else:
+                #liststr = [str(n) for n in v]
+                #market_group_info[i][k] = ' '.join(liststr)
