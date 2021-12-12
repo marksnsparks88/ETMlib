@@ -3,15 +3,15 @@ import sqlite3
 import os, re
 import json
 
-response = requests.get("https://esi.evetech.net/latest/markets/groups/?datasource=tranquility")
-market_group_ids=response.json()
-
 #download market group info
 if os.path.exists('market_group_info_tmp.json'):
     with open('market_group_info_tmp.json', 'r') as f:
         market_group_info=[json.loads(j) for j in f]
 else:
     market_group_info=[]
+
+response = requests.get("https://esi.evetech.net/latest/markets/groups/?datasource=tranquility")
+market_group_ids=response.json()
     
 for i in market_group_ids:
     got = False
@@ -30,8 +30,7 @@ for i in market_group_ids:
             print(" Recieved {} out of 1926".format(len(market_group_info)), end="\r")
         else:
             print("Group {} skipped with error code {}".format(i, sgroup_info.status_code))
-
-        
+ 
 #download item info
 if os.path.exists('market_type_info_tmp.json'):
     with open('market_type_info_tmp.json', 'r') as f:
@@ -60,15 +59,15 @@ for i in range(len(market_group_info)):
                     print("Type {} skipped with error code {}".format(j, type_info.status_code))
 
 #download system info
-response = requests.get("https://esi.evetech.net/latest/universe/systems/?datasource=tranquility")
-system_ids=response.json()
-
 if os.path.exists('system_info_tmp.json'):
     with open('system_info_tmp.json', 'r') as f:
         system_info=[json.loads(j) for j in f]
 else:
     system_info=[]
     
+response = requests.get("https://esi.evetech.net/latest/universe/systems/?datasource=tranquility")
+system_ids=response.json()
+
 for i in system_ids:
     got = False
     for j in system_info:
@@ -115,15 +114,15 @@ for i in system_info:
                 print("Station {} skipped with error code {}".format(i, station_request.status_code))
                 
 #download constellation info
-response = requests.get("https://esi.evetech.net/latest/universe/constellations/?datasource=tranquility")
-constellation_ids=response.json()
-
 if os.path.exists('constellation_info_tmp.json'):
     with open('constellation_info_tmp.json', 'r') as f:
         constellation_info=[json.loads(j) for j in f]
 else:
     constellation_info=[]
     
+response = requests.get("https://esi.evetech.net/latest/universe/constellations/?datasource=tranquility")
+constellation_ids=response.json()
+
 for i in constellation_ids:
     got = False
     for j in constellation_info:
@@ -143,15 +142,15 @@ for i in constellation_ids:
             print("Constellation {} skipped with error code {}".format(i, constellation_request.status_code))
 
 #download region info
-response = requests.get("https://esi.evetech.net/latest/universe/regions/?datasource=tranquility")
-region_ids=response.json()
-
 if os.path.exists('region_info_tmp.json'):
     with open('region_info_tmp.json', 'r') as f:
         region_info=[json.loads(j) for j in f]
 else:
    region_info=[]
     
+response = requests.get("https://esi.evetech.net/latest/universe/regions/?datasource=tranquility")
+region_ids=response.json()
+
 for i in region_ids:
     got = False
     for j in region_info:
@@ -185,7 +184,7 @@ add_data('system_info', system_info, 'eve-data.db')
 create_table('constellation_info', constellation_info, 'eve-data.db')
 add_data('constellation_info', constellation_info, 'eve-data.db')
 
-create_table('region_info', region_info)
+create_table('region_info', region_info, 'eve-data.db')
 add_data('region_info', region_info, 'eve-data.db')
 
 def get_table_headers(list_):
@@ -218,6 +217,7 @@ def get_table_headers(list_):
         header = header+"{} {}, ".format(k, t)
     return header[:-2]
 
+
 def create_table(name, list_, db_file):
     db = sqlite3.connect(db_file)
     cur = db.cursor()
@@ -228,6 +228,7 @@ def create_table(name, list_, db_file):
     db.commit()
     cur.close()
     db.close()
+
 
 def add_data(name, list_, db_file):
     db = sqlite3.connect(db_file)
@@ -249,40 +250,11 @@ def add_data(name, list_, db_file):
                 line[k] = str(line[k]).replace("\'", "\"")
         for c in columns:
             if c not in line.keys():
-                line[c] = None
+                line[c] = ''
         params = []
         for c in columns:
             params.append(line[c])
         cur.execute(cmd, params)
-        db.commit()
+    db.commit()
     cur.close()
     db.close()
-
-
-
-print()
-#remove un-needed item info
-#for i in market_type_info:
-    #if 'dogma_attributes' in i.keys():
-        #del i['dogma_attributes']
-    #if 'dogma_effects' in i.keys():
-        #del i['dogma_effects']
-
-#create child group list
-#for i in range(len(market_group_info)):
-    #if 'child_groups' not in market_group_info[i].keys():
-        #market_group_info[i]['child_groups']=[]
-    #for j in range(len(market_group_info)):
-        #if 'parent_group_id' in market_group_info[j].keys():
-            #if market_group_info[j]['parent_group_id'] == market_group_info[i]['market_group_id']:
-                #market_group_info[i]['child_groups'].append(market_group_info[j]['market_group_id'])
-
-#merge lists into strings for database
-#for i in range(len(market_group_info)):
-    #for k, v in market_group_info[i].items():
-        #if type(v).__name__ == 'list':
-            #if len(v) == 0:
-                #market_group_info[i][k] = None
-            #else:
-                #liststr = [str(n) for n in v]
-                #market_group_info[i][k] = ' '.join(liststr)
