@@ -29,7 +29,7 @@ class OAuth():
         self.dbfile ="OAuth.db"
         
     def authenticate(self):
-        print("authenticating")
+        print("Authenticating")
         db = sqlite3.connect(self.dbfile)
         random = base64.urlsafe_b64encode(secrets.token_bytes(32))
         m = hashlib.sha256()
@@ -49,6 +49,7 @@ class OAuth():
         string_params = urllib.parse.urlencode(params)
         full_auth_url = "{}?{}".format(self.aurthorize, string_params)
         
+        print("Open the link Below to go to the Eve Online login Page")
         print(full_auth_url)
             
         auth = Callback_Server(self.hostName, self.serverPort)
@@ -96,11 +97,21 @@ class OAuth():
                 db.commit()
             c.close()
             db.close()
+            return (character_id_, character_name_, access_token)
+    return None
         
-    def refresh(self, character_name):
-        print("refreshing")
+    def refresh(self):
+        print("Refreshing")
         db = sqlite3.connect(self.dbfile)
         c = db.cursor()
+        
+        character_names = c.execute("SELECT character_name FROM OAuth").fetchall()
+        print("Available Characters")
+        for c in range(len(character_names)):
+            print(character_names[c][0])
+            
+        character_name = input("Copy & paste character here: ")
+        
         refresh_token = c.execute("SELECT refresh_token FROM OAuth WHERE character_name = ?", ([character_name])).fetchall()[0][0]
         headers = {"Content-Type": "application/x-www-form-urlencoded",
                     "Host": "login.eveonline.com"}
@@ -117,19 +128,35 @@ class OAuth():
             db.commit()
             c.close()
             db.close()
+            return (character_id_, character_name_, access_token)
+    return None
             
 
 if __name__ == "__main__":
+    try:
+        args = sys.argv[1]
+    except:
+        args = []
+        
     auth = OAuth()
-    auth.authenticate()
+    if os.path.exists(auth.dbfile):
+        if len(args) > 0:
+            character = auth.authenticate()
+            if character:
+                print("Character: {} with id: {} authenticated".format(character[1]), character[0])
+                print("Access token: {}".format(character[2]))
+        else:
+            character = auth.refresh()
+            if character:
+                print("Character: {} with id: {} updated".format(character[1]), character[0])
+                print("Access token: {}".format(character[2]))
+    else:
+        character = auth.authenticate()
+        if character:
+            print("Character: {} with id: {} authenticated".format(character[1]), character[0])
+            print("Access token: {}".format(character[2]))
     
-    db = sqlite3.connect(auth.dbfile)
-    c = db.cursor()
-    
-    data = c.execute("SELECT character_id, character_name, access_token, refresh_token FROM OAuth").fetchall()
-    
-    headers = {"Authorization": "Bearer {}".format(data[0][2])}
-    print(data[0][0], data[0][1])
+
     
       
 
