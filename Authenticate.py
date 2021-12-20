@@ -31,6 +31,7 @@ class OAuth():
     def authenticate(self):
         print("Authenticating")
         db = sqlite3.connect(self.dbfile)
+        cur = db.cursor()
         random = base64.urlsafe_b64encode(secrets.token_bytes(32))
         m = hashlib.sha256()
         m.update(random)
@@ -83,36 +84,30 @@ class OAuth():
             
             params=(character_id_, character_name_, access_token, refresh_token)
             
-            c = db.cursor()
-            c.execute("CREATE TABLE IF NOT EXISTS OAuth(character_id interger, character_name text, access_token text, refresh_token text)")
+            cur.execute("CREATE TABLE IF NOT EXISTS OAuth(character_id interger, character_name text, access_token text, refresh_token text)")
             try:
                 db_character_id = c.execute("SELECT character_id FROM OAuth WHERE character_id = ?", ([character_id_])).fetchall()[0][0]
             except IndexError:
                 db_character_id = 0
             if int(character_id_) != int(db_character_id):
-                c.execute("INSERT INTO OAuth VALUES (?, ?, ?, ?)", params)
+                cur.execute("INSERT INTO OAuth VALUES (?, ?, ?, ?)", params)
                 db.commit()
             elif int(character_id_) == int(db_character_id):
-                c.execute("UPDATE OAuth SET access_token = ?, refresh_token = ? WHERE character_id = ?", [data["access_token"], data["refresh_token"], character_id_])
+                cur.execute("UPDATE OAuth SET access_token = ?, refresh_token = ? WHERE character_id = ?", [data["access_token"], data["refresh_token"], character_id_])
                 db.commit()
-            c.close()
+            cur.close()
             db.close()
             return (character_id_, character_name_, access_token)
-    return None
+        return None
         
-    def refresh(self):
-        print("Refreshing")
+    def refresh(self, character_name):
         db = sqlite3.connect(self.dbfile)
-        c = db.cursor()
+        cur = db.cursor()
         
-        character_names = c.execute("SELECT character_name FROM OAuth").fetchall()
-        print("Available Characters")
-        for c in range(len(character_names)):
-            print(character_names[c][0])
-            
-        character_name = input("Copy & paste character here: ")
-        
-        refresh_token = c.execute("SELECT refresh_token FROM OAuth WHERE character_name = ?", ([character_name])).fetchall()[0][0]
+        cdata = cur.execute("SELECT *  FROM OAuth WHERE character_name = ?", ([character_name])).fetchall()
+        character_id_ = cdata[0][0]
+        character_name_ = cdata[0][1]
+        refresh_token = cdata[0][3]
         headers = {"Content-Type": "application/x-www-form-urlencoded",
                     "Host": "login.eveonline.com"}
         form_values = {"grant_type": "refresh_token",
@@ -122,14 +117,14 @@ class OAuth():
         response = requests.post(self.token, data=form_values, headers=headers)
         if response.status_code == 200:
             data = response.json()
+            access_token = data['access_token']
             
-            
-            c.execute("UPDATE OAuth SET access_token = ? WHERE refresh_token = ?", [data['access_token'], data['refresh_token']])
+            cur.execute("UPDATE OAuth SET access_token = ? WHERE refresh_token = ?", [data['access_token'], data['refresh_token']])
             db.commit()
-            c.close()
+            cur.close()
             db.close()
             return (character_id_, character_name_, access_token)
-    return None
+        return None
             
 
 if __name__ == "__main__":

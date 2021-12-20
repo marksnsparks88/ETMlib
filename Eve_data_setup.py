@@ -255,6 +255,6 @@ def add_data(name, list_, db_file):
         for c in columns:
             params.append(line[c])
         cur.execute(cmd, params)
-    db.commit()
+        db.commit()
     cur.close()
     db.close()
