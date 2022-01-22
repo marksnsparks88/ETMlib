@@ -1,89 +1,69 @@
-import sqlite3
-db = sqlite3.connect("eve-data.db")
-cur = db.cursor()
-            
-select_market = """SELECT market_group_id,name,parent_group_id,types 
-                    FROM market_group_info 
-                    WHERE {}=?"""
-select_type="""SELECT type_id,name,market_group_id,description
-                FROM market_type_info
-                WHERE {}=?"""
-select_market_parent = select_market.format("parent_group_id")
-select_market_self = select_market.format("market_group_id")
-select_type_self = select_type.format("type_id")
-select_type_group = select_type.format("market_group_id")
-            
+import ETMlib
+import os, requests, json
+
+
+
+
+with open('eve-cache/region_names.json') as f:
+    regions = json.load(f)
+with open('eve-cache/group_info.json', 'r') as f:
+  marketGroups = json.load(f)
+with open('eve-cache/type_names.json', 'r') as f:
+  marketItems = json.load(f)
+
 choice = 0
-indexes = ['']
-items = ['']
-types = ['']
-GoBack = False
-browse = True
-while browse == True:
-    NoItems = False
-    if choice == 0 or choice == '':
-        indexes = ['']
-        #print(indexes)
-        path = '.'
-        for g in range(1, len(indexes)):
-            group = cur.execute(select_market_self, ([indexes[g]])).fetchall()[0][1]
-            path = path+' > '+str(group)
-        print(path)
-        items = cur.execute(select_market_parent, ([indexes[-1]])).fetchall()
-        items = ['']+items
-        for i in range(1, len(items)):
-            #print("{}) [{}] {}".format(i, items[i][0], items[i][1]))
-            print("{}) {}".format(i, items[i][1]))
-    elif choice == '<':
-        if len(indexes) > 1:
-            del indexes[-1]
-        #print(indexes)
-        path = '.'
-        for g in range(1, len(indexes)):
-            group = cur.execute(select_market_self, ([indexes[g]])).fetchall()[0][1]
-            path = path+' > '+str(group)
-        print(path)
-        items = cur.execute(select_market_parent, ([indexes[-1]])).fetchall()
-        items = ['']+items
-        for i in range(1, len(items)):
-            #print("{}) [{}] {}".format(i, items[i][0], items[i][1]))
-            print("{}) {}".format(i, items[i][1]))
-    elif len(items) > 1:
-        indexes.append(items[choice][0])
-        #print(indexes)
-        path = '.'
-        for g in range(1, len(indexes)):
-            group = cur.execute(select_market_self, ([indexes[g]])).fetchall()[0][1]
-            path = path+' > '+str(group)
-        print(path)
-        items = cur.execute(select_market_parent, ([indexes[-1]])).fetchall()
-        items = ['']+items
-        for i in range(1, len(items)):
-            #print("{}) [{}] {}".format(i, items[i][0], items[i][1]))
-            print("{}) {}".format(i, items[i][1]))
-        if len(items) == 1:
-            types = cur.execute(select_type_group, ([indexes[-1]])).fetchall()
-            types = ['']+types
-            if len(types) > 1:
-                for i in range(1, len(types)):
-                    #print("{}) [{}] {}".format(i, types[i][0], types[i][1]))
-                    print("{}) {}".format(i, types[i][1]))
-            else:
-                GoBack = True
-                print("No Items")
-                choice = '<'
-                
-    elif len(types) > 1:
-        description = (cur.execute(select_type_self, ([types[choice][0]])).fetchall()[0][3])
-        print(description)
-        if not description:
-            print("no description")
-           
-    if not GoBack:
-        choice = input()
-    if choice == 'q' or choice == 'quit':
-        browse = False
-    try:
-        choice = int(choice)
-    except ValueError:
+selected = ['root']
+region = 10000032
+path=[['root']]
+run = True
+while run:
+    for p in path:
+        print(p[0], end='/')
+    print()
+    menu = [['root'], ['back'], ['region']]
+    if selected[0] == 'root':
+        path = [['root']]
+        for i in marketGroups:
+            if 'parent_group_id' not in i.keys():
+                menu.append([i['name'], i['market_group_id'], i['types']])
+    elif selected[0] == 'back':
+        del path[-2:]
+        selected = path[-1]
         continue
+    elif selected[0] == 'region':
+        del path[-1]
+        selected = path[-1]
+        for i in range(len(regions)):
+            print(i, regions[i]['id'], regions[i]['name'])
+        region = input('which region: ')
+        region = regions[int(region)]['id']
+        continue
+    elif selected[2] == 'item':
+        ETMlib.market_orders(region, selected[1])
+        ETMlib.display(region, selected[1])
+    elif len(selected[2]) != 0:
+        for i in selected[2]:
+            for j in marketItems:
+                if j['id'] == i:
+                    menu.append([j['name'], j['id'], 'item'])
+
+    else:
+        for i in marketGroups:
+            if 'parent_group_id' in i.keys():
+                if i['parent_group_id'] == int(selected[1]):
+                    menu.append([i['name'], i['market_group_id'], i['types']])
+    
+    for i in range(len(menu)):
+        print(i, menu[i])
+    
+    choice = input('select group: ')
+    if choice == 'q':
+        run = False
+    else:
+        selected = menu[int(choice)]
+        print(selected[0])
+        path.append(selected)
+
+
+
+        
