@@ -8,6 +8,7 @@ import requests
 from requests.adapters import HTTPAdapter
 import sqlite3
 import os, sys, time, csv
+import datetime as dt
 import json
 import esi_paths as esi
 #helper functions
@@ -73,55 +74,10 @@ def get_bulk_info(urls, size=None, headers=None):
         r.session.close()
     return resp
 
-def cache(data, file_, as_csv=True, mode='w'):
-    dir_ = file_.rsplit('/', 1)[0]
-    if not os.path.exists(dir_):
-        os.makedirs(dir_)
-    if as_csv == True:
-        try:
-            h = list(data[0].keys())
-        except:
-            print("data", data)
-        csv = []
-        for i in data:
-            line=[]
-            for k in h:
-                line.append(str(i[k]))
-            csv.append(",".join(line))
-        with open(file_, mode) as f:
-            f.write(','.join(h)+"\n")
-            for i in csv:
-                f.write(i+"\n")
-    else:
-        with open(file_, mode) as f:
-            json.dump(data, f, indent=1)
-
-def load_cache(file_, as_list=True):
-    if as_list == True:
-        data = []
-        with open(file_, 'r') as f:
-            tdata = f.readlines()
-        for i in tdata:
-            l = i.replace("\n", "").split(",")
-            data.append(l)
-    else:
-        try:
-            with open(file_, 'r') as f:
-                data = json.load(f)
-        except:
-            data=[]
-            with open(file_, 'r') as f:
-                header = f.readline().replace("\n", "").split(",")
-                for l in f.readlines():
-                    d = l.replace("\n", "").split(",")
-                    dict_={}
-                    for h in range(len(header)):
-                        dict_[header[h]] = d[h]
-                    data.append(dict_)
-    return data
-
 #character info
 def get_character_transactions():
+    if not os.path.exists('logs/characters'):
+        os.makedirs('logs/characters')
     auth = OAuth()
     auth_data = auth.get()
     for i in range(len(auth_data)):
@@ -134,7 +90,8 @@ def get_character_transactions():
                 char_auth_data = auth.get()[i]
                 headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
                 resp = requests.get(url, headers=headers)
-            
+        
+        print(resp.status_code)
         old_trans_file = "logs/characters/"+str(auth_data[i][0])+"_transactions.json"
         
         if os.path.exists(old_trans_file):
@@ -153,59 +110,39 @@ def get_character_transactions():
             if in_ == False:
                 extra.append(n)
                 
-        type_ids=[]
-        location_ids=[]
-        structure_ids=[]
-        for i in extra:
-            if i['type_id'] not in type_ids:
-                type_ids.append(i['type_id'])
-            if i["location_id"] <= 0xffffffff:
-                if i['location_id'] not in location_ids:
-                    location_ids.append(i['location_id'])
-            else:
-                if i['location_id'] not in structure_ids:
-                    structure_ids.append(i['location_id'])
-        
-        type_ids = get_id_names(type_ids)
-        location_ids = get_id_names(location_ids)
-        structure_ids = get_pos_info(structure_ids)
-        
-        location_ids = location_ids+structure_ids
+        with open('eve-cache/market_types.json', 'r') as f:
+            market_types = json.load(f)
+            
+        type_ids = []
+        for i in market_types:
+            if i['published'] == True:
+                type_ids.append((i['name'], i['type_id']))
+            
+        with open("eve-cache/stations.json", "r") as f:
+            stations = json.load(f)
+            
+        with open("eve-cache/structures.json", "r") as f:
+            structures = json.load(f)
         
         for i in extra:
             for j in type_ids:
-                if i['type_id'] == j['id']:
-                    i['type_name'] = j['name']
-            for j in location_ids:
+                if i['type_id'] == j[1]:
+                    i['type_name'] = j[0]
+            for j in stations:
+                if i['location_id'] == j['station_id']:
+                    i['location_name'] = j['name']
+            for j in structures:
                 if i['location_id'] == j['id']:
                     i['location_name'] = j['name']
                 
-        print("Saving {}".format(old_trans_file))
         with open(old_trans_file, 'w') as f:
             json.dump(extra+old_trans, f, indent=1)
-        
-def get_balance():
-    auth = OAuth()
-    auth_data = auth.get()
-    balances = []
-    for i in range(len(auth_data)):
-        url = esi.wallet_balance.format(auth_data[i][0])
-        headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
-        resp = requests.get(url, headers=headers)
-        if resp.status_code == 403:
-            if resp.json()['error'] == 'token is expired':
-                auth.refresh()
-                char_auth_data = auth.get()[i]
-                headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
-                resp = requests.get(url, headers=headers)
-        
-        balances.append([auth_data[i][1], resp.json()])
-    return balances
-    
+
 def get_character_orders():
+    if not os.path.exists('logs/characters'):
+        os.makedirs('logs/characters')
     auth = OAuth()
     auth_data = auth.get()
-    temp=[]
     for i in range(len(auth_data)):
         url = esi.market_character_orders.format(auth_data[i][0])
         headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
@@ -220,90 +157,101 @@ def get_character_orders():
         data = resp.json().copy()
         orders_file = "logs/characters/"+str(auth_data[i][0])+"_orders.json"
         
-                
-        type_ids=[]
-        location_ids=[]
-        structure_ids=[]
-        for i in data:
-            if i['type_id'] not in type_ids:
-                type_ids.append(i['type_id'])
-            if i["location_id"] <= 0xffffffff:
-                if i['location_id'] not in location_ids:
-                    location_ids.append(i['location_id'])
-            else:
-                if i['location_id'] not in structure_ids:
-                    structure_ids.append(i['location_id'])
+        with open('eve-cache/market_types.json', 'r') as f:
+            market_types = json.load(f)
+            
+        type_ids = []
+        for i in market_types:
+            if i['published'] == True:
+                type_ids.append((i['name'], i['type_id']))
+            
+        with open('eve-cache/stations.json', 'r') as f:
+            stations = json.load(f)
         
-        type_ids = get_id_names(type_ids)
-        location_ids = get_id_names(location_ids)
-        structure_ids = get_pos_info(structure_ids)
-        
-        location_ids = location_ids+structure_ids
+        with open('eve-cache/structures.json', 'r') as f:
+            structures = json.load(f)
+            
         for i in data:
             for j in type_ids:
-                if i['type_id'] == j['id']:
-                    i['type_name'] = j['name']
-            for j in location_ids:
+                if i['type_id'] == j[1]:
+                    i['type_name'] = j[0]
+            for j in stations:
+                if i['location_id'] == j['station_id']:
+                    i['location_name'] = j['name']
+            for j in structures:
                 if i['location_id'] == j['id']:
                     i['location_name'] = j['name']
                     
         with open(orders_file, 'w') as f:
             json.dump(data, f, indent=1)
-        
+
 def get_character_assets():
+    if not os.path.exists('logs/characters'):
+        os.makedirs('logs/characters')
+        
     auth = OAuth()
     auth_data = auth.get()
-    dall=[]
+    auth.refresh()
     for i in range(len(auth_data)):
-        url = esi.assets.format(auth_data[i][0])
+        data=[]
+        url = esi.assets.format(auth_data[i][0], 1)
         headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
-        resp = requests.get(url, headers=headers)
-        if resp.status_code == 403:
-            if resp.json()['error'] == 'token is expired':
-                auth.refresh()
-                char_auth_data = auth.get()[i]
-                headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
-                resp = requests.get(url, headers=headers)
+        resp = requests.head(url, headers=headers)
+        pages = int(resp.headers['X-pages'])
+        for j in range(1, pages+1):
+            url = esi.assets.format(auth_data[i][0], j)
+            headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
+            resp = requests.get(url, headers=headers)
+            if resp.status_code == 403:
+                if resp.json()['error'] == 'token is expired':
+                    auth.refresh()
+                    char_auth_data = auth.get()[i]
+                    headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
+                    resp = requests.get(url, headers=headers)
+            data = data+resp.json()
         
-        data = resp.json().copy()
+
         assets_file = "logs/characters/"+str(auth_data[i][0])+"_assets.json"
         
-        type_ids=[]
-        item_ids=[]
-        station_ids=[]
-        structure_ids=[]
-        location_ids=[]
+        item_tmp=[]
         for j in data:
-            if j['type_id'] not in type_ids:
-                type_ids.append(j['type_id'])
-            if j['location_type'] == 'station':
-                if j["location_id"] <= 0xffffffff:
-                    if j['location_id'] not in location_ids:
-                        station_ids.append(j['location_id'])
-                else:
-                    if j['location_id'] not in structure_ids:
-                        structure_ids.append(j['location_id'])
-            else:
-                if j['location_id'] not in location_ids:
-                    location_ids.append(j['location_id'])
-            if j['item_id'] not in item_ids:
-                    item_ids.append(j['item_id'])
-                    
-        type_ids = get_id_names(type_ids) if len(type_ids) != 0 else []
-        item_ids = get_asset_names(item_ids, auth_data[i][0]) if len(item_ids) != 0 else []
-        station_ids = get_id_names(station_ids) if len(station_ids) != 0 else []
-        structure_ids = get_pos_info(structure_ids) if len(structure_ids) != 0 else []
-        #location_ids = get_asset_locations(location_ids, auth_data[i][0]) if len(location_ids) != 0 else []
+            if j['item_id'] not in item_tmp:
+                    item_tmp.append(j['item_id'])
         
-        location_ids = structure_ids+station_ids
+        item_ids=[]
+        for j in range(0, len(item_tmp), 1000):
+            item_ids.append(item_tmp[j:j+1000])
+
+        with open('eve-cache/market_types.json', 'r') as f:
+            market_types = json.load(f)
+            
+        type_ids = []
+        for j in market_types:
+            if j['published'] == True:
+                type_ids.append((j['name'], j['type_id']))
+            
+        with open("eve-cache/stations.json", "r") as f:
+            stations = json.load(f)
+            
+        with open("eve-cache/structures.json", "r") as f:
+            structures = json.load(f)
+        
+        item_data=[]
+        for j in item_ids:
+            item_data = item_data + get_asset_names(j, auth_data[i][0])
+        item_ids = item_data
+        
         for j in data:
             for k in type_ids:
-                if j['type_id'] == k['id']:
-                    j['type_name'] = k['name']
+                if j['type_id'] == k[1]:
+                    j['type_name'] = k[0]
             for k in item_ids:
                 if j['item_id'] == k['item_id']:
                     j['item_name'] = k['name']
-            for k in location_ids:
+            for k in stations:
+                if j['location_id'] == k['station_id']:
+                    j['location_name'] = k['name']
+            for k in structures:
                 if j['location_id'] == k['id']:
                     j['location_name'] = k['name']
                     
@@ -340,7 +288,6 @@ def get_character_assets():
                             ptot = ptot + k['unit_price']
                 
             j['med_price'] = float("{:.2f}".format(ptot / j['quantity']))
-            #j['med_price'] = ptot / j['quantity']
         
         for j in data:
             for k in totals:
@@ -350,25 +297,105 @@ def get_character_assets():
                     
         with open(assets_file, 'w') as f:
             json.dump(data, f, indent=1)
+
+def get_character_skills():
+    if not os.path.exists('logs/characters'):
+        os.makedirs('logs/characters')
         
-def get_asset_locations(ids, character_id):
     auth = OAuth()
-    auth_data = []
-    for i in auth.get():
-        if i[0] == character_id:
-            auth_data = i
+    auth_data = auth.get()
+    for i in range(len(auth_data)):
+        url = esi.skills.format(auth_data[i][0])
+        headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 403:
+            if resp.json()['error'] == 'token is expired':
+                auth.refresh()
+                char_auth_data = auth.get()[i]
+                headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
+                resp = requests.get(url, headers=headers)
+        data = resp.json()
+        ids=[]
+        for j in data['skills']:
+            if j['skill_id'] not in ids:
+                ids.append(j['skill_id'])
+                
+        ids = requests.post(esi.uni_names, data=str(ids))
+        for j in data['skills']:
+            for k in ids.json():
+                if j['skill_id'] == k['id']:
+                    j['skill_name'] = k['name']
+        
+        with open('logs/characters/'+str(auth_data[i][0])+'_skills.json', 'w') as f:
+            json.dump(data, f, indent=1)
+
+def get_character_balance():
+    if not os.path.exists('logs/characters'):
+        os.makedirs('logs/characters')
+    auth = OAuth()
+    auth_data = auth.get()
+    date = time.strftime("%a %d %b %Y", time.gmtime())
+    balances = []
+    for i in range(len(auth_data)):
+        url = esi.wallet_balance.format(auth_data[i][0])
+        headers = {"Authorization": "Bearer {}".format(auth_data[i][2])}
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 403:
+            if resp.json()['error'] == 'token is expired':
+                auth.refresh()
+                char_auth_data = auth.get()[i]
+                headers = {"Authorization": "Bearer {}".format(char_auth_data[2])}
+                resp = requests.get(url, headers=headers)
+        with open('logs/characters/'+str(auth_data[i][0])+'_balance', 'a') as f:
+            f.write(date+','+str(resp.json())+"\n")
+        balances.append([auth_data[i][1], resp.json()])
     
-    headers = {"Authorization": "Bearer {}".format(auth_data[2])}
-    response = requests.post(esi.asset_locations.format(character_id), data=str(ids), headers=headers)
-    if response.status_code == 401 or response.status_code == 403:
-        print("Refreshing...")
-        auth.refresh()
-        for i in auth.get():
-            if i[0] == character_id:
-                auth_data = i
-        headers = {"Authorization": "Bearer {}".format(auth_data[2])}
-        response = requests.post(esi.asset_locations.format(character_id), data=str(ids), headers=headers)
-    return response.json()
+def ledger(character_id, date='2003-03-06'):
+    with open("logs/characters/"+str(character_id)+"_transactions.json") as f:
+        trans = json.load(f)
+    
+    sd = date.split('-')
+    date = dt.datetime(int(sd[0]), int(sd[1]), int(sd[2]))
+    ledger=[]
+    for i in trans:
+        td = i['date'].split('T')[0].split('-')
+        td = dt.datetime(int(td[0]), int(td[1]), int(td[2]))
+        if td >= date:
+            in_ = False
+            for j in ledger:
+                if i['type_name'] == j[0]:
+                    in_ = True
+                    if i['is_buy'] == True:
+                        j[1] = j[1] + i['quantity']
+                        j[2] = j[2] + (i['unit_price']*i['quantity'])
+                    else:
+                        j[3] = j[3] + i['quantity']
+                        j[4] = j[4] + (i['unit_price']*i['quantity'])
+                    j[5] = j[4] - j[2]
+            if in_ == False:
+                if i['is_buy'] == True:
+                    brought_value = i['unit_price']*i['quantity']
+                    brought_quantity = i['quantity']
+                    sold_value = 0
+                    sold_quantity = 0
+                else:
+                    brought_value = 0
+                    brought_quantity = 0
+                    sold_value = i['unit_price']*i['quantity']
+                    sold_quantity = i['quantity']
+        
+                profit = sold_value - brought_value
+                item = [i['type_name'],
+                        brought_quantity,
+                        brought_value,
+                        sold_quantity,
+                        sold_value,
+                        profit]
+                ledger.append(item)
+
+    print("{:<50}{:<10}{:<25}{:<10}{:<25}".format("item", "brought", "value", "Sold", "Value"))
+    for i in sorted(ledger, key=lambda i: i[-1], reverse=True):
+        print("{:.<50}{:.<10,}{:.<25,.2f}{:.<10,}{:.<25,.2f}{:,.2f}".format(i[0], i[1], i[2], i[3], i[4], i[5]))
 
 def get_asset_names(ids, character_id):
     auth = OAuth()
@@ -389,49 +416,6 @@ def get_asset_names(ids, character_id):
         response = requests.post(esi.asset_names, data=str(ids), headers=headers)
     return response.json()
 
-def ledger(character_id):
-    with open("logs/characters/"+str(character_id)+"_transactions.json") as f:
-        trans = json.load(f)
-
-    ledger=[]
-    for i in trans:
-        in_ = False
-        for j in ledger:
-            if i['type_name'] == j[0]:
-                in_ = True
-                if i['is_buy'] == True:
-                    j[1] = j[1] + i['quantity']
-                    j[2] = j[2] + (i['unit_price']*i['quantity'])
-                else:
-                    j[3] = j[3] + i['quantity']
-                    j[4] = j[4] + (i['unit_price']*i['quantity'])
-                j[5] = j[4] - j[2]
-        if in_ == False:
-            if i['is_buy'] == True:
-                brought_value = i['unit_price']*i['quantity']
-                brought_quantity = i['quantity']
-                sold_value = 0
-                sold_quantity = 0
-            else:
-                brought_value = 0
-                brought_quantity = 0
-                sold_value = i['unit_price']*i['quantity']
-                sold_quantity = i['quantity']
-    
-            profit = sold_value - brought_value
-            item = [i['type_name'],
-                    brought_quantity,
-                    brought_value,
-                    sold_quantity,
-                    sold_value,
-                    profit]
-            ledger.append(item)
-
-    for i in sorted(ledger, key=lambda i: i[-1], reverse=True):
-        print(i[0])
-        print("{:<10}{:<15}{:<10}{:<15}".format("brought", "value", "Sold", "Value"))
-        print("{:.<10,}{:.<15,.2f}{:.<10,}{:.<15,.2f}{:,.2f}".format(i[1], i[2], i[3], i[4], i[5]))
-
 def getSkill(file_, skill, full=True):
     with open(file_, 'r') as f:
         data = json.load(f)
@@ -443,492 +427,892 @@ def getSkill(file_, skill, full=True):
                 return i['active_skill_level']
 
 #esi data
-def get_id_names(ids):
-    ids = list(dict.fromkeys(ids))
-    headers = {"accept": "application/json",
-               "Accept-Language": "en", 
-               "Content-Type": "application/json",
-               "Cache-Control": "no-cache"}
-    resp = requests.post(esi.uni_names, data=str(ids), headers=headers)
+def get_type_info(size=None):
+    resp = requests.head(esi.uni_types.format(1))
+    pages = int(resp.headers['X-pages'])
+    print(pages)
+    types=[]
+    for i in range(1, pages+1):
+        print('page:', i, end="\r")
+        type_ids = requests.get(esi.uni_types.format(i))
+        
+        urls=[]
+        for j in type_ids.json():
+            urls.append(esi.uni_type_info.format(j))
+            
+        data = get_bulk_info(urls, size=size)
+        
+        failed = []
+        ndx=0
+        while ndx != len(data):
+            if data[ndx].status_code != 200:
+                failed.append(data[ndx])
+                del data[ndx]
+            else:
+                ndx += 1
+        
+        while len(failed) > 0:
+            failed = []
+            retry = get_bulk_info(failed, size=size)
+            for j in retry:
+                if j.status_code != 200:
+                    failed.append(j)
+                else:
+                    data.append(j)
+        
+        for i in data:
+            types.append(i.json())
     
-    if resp.status_code == 400:
-        return[]
-    return resp.json()
+    print()
+    market_types=[]
+    for i in types:
+        if 'market_group_id' in i.keys():
+            market_types.append(i)
+            
+    with open('eve-cache/market_types.json', 'w') as f:
+        json.dump(market_types, f, indent=1)
+        
+    with open('eve-cache/types.json', 'w') as f:
+        json.dump(types, f, indent=1)
 
-def get_type_names():
-    resp = requests.get(esi.uni_types.format(1))
-    type_names = get_id_names(resp.json())
-    for i in range(2, int(resp.headers['X-pages'])+1):
-        resp = requests.get(esi.uni_types.format(i))
-        type_names = type_names + get_id_names(resp.json())
-    cache(type_names, "eve-cache/uni_types.csv", as_csv=False, mode='w')
-
-def get_region_names():
-    resp = requests.get(esi.uni_regions)
-    data = get_id_names(resp.json())
-    cache(data, "eve-cache/region_names.json", as_csv=False)
+def get_structure_info(size=None):
+    auth = OAuth()
+    auth.refresh()
+    char_data = auth.get()
+    
+    resp = requests.get(esi.uni_structure_ids)
+        
+    urls=[]
+    for i in resp.json():
+        urls.append(esi.uni_structure_info.format(i))
+    
+    data = []
+    for char in char_data:
+        headers = {"Authorization": "Bearer {}".format(char[2])}
+        resp = get_bulk_info(urls, size=size, headers=headers)
+        data = data+resp
+        
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
+        else:
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+                
+    structs = []
+    for i in data:
+        id_ = int(i.url.split('/')[-2])
+        d = i.json()
+        d['id'] = id_
+        if len(structs) == 0:
+            structs.append(d)
+        if d not in structs:
+            structs.append(d)
+            
+    with open('eve-cache/structures.json', 'w') as f:
+        json.dump(structs, f, indent=1)
 
 def get_group_info(size=None):
-    resp = requests.get(market_groups)
-    group_info_urls=[]
+    resp = requests.get(esi.market_groups)
+    urls=[]
     for i in resp.json():
-        group_info_urls.append(market_group_info.format(i))
-    print(size, len(group_info_urls))
-    resp = get_bulk_info(group_info_urls, size=size)
-    data=[]
-    for i in resp:
-        data.append(i.json())
-    cache(data, "eve-cache/market_group_info.json", as_csv=False)
-
-def get_pos_info(ids):
-    auth = OAuth()
-    auth_data = auth.get()
+        urls.append(esi.market_group_info.format(i))
+        
+    data = get_bulk_info(urls, size=size)
     
-    headers = {"Authorization": "Bearer {}".format(auth_data[0][2])}
-    urls = []
-    for i in ids:
-        urls.append(esi.uni_structure_info.format(i))
-                
-    res = get_bulk_info(urls, headers=headers)
-    for r in res:
-        if r.reason == 'Unauthorized' or r.reason == 'Forbidden':
-            auth.refresh()
-            auth_data = auth.get()
-            headers = {"Authorization": "Bearer {}".format(auth_data[0][2])}
-            res = get_bulk_info(urls, headers=headers)
-            break
-    pos=[]
-    for r in res:
-        if r.reason == "Forbidden":
-            d = {'category': 'unknown', 'name': r.json()['error'], 'id':int(r.url.rsplit('/', 2)[1])}
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
         else:
-            d = {'category': 'unknown', 'name': r.json()['name'], 'id':int(r.url.rsplit('/', 2)[1])}
-        pos.append(d)
-    return pos
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+                
+    market_groups=[]
+    for i in data:
+        market_groups.append(i.json())
+        
+    with open('eve-cache/market_groups.json', 'w') as f:
+        json.dump(market_groups, f, indent=1)
+
+def get_region_info(size=None):
+    resp = requests.get(esi.uni_regions)
+    urls=[]
+    for i in resp.json():
+        urls.append(esi.uni_region_info.format(i))
+    
+    data = get_bulk_info(urls, size=size)
+
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
+        else:
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+                
+    regions=[]
+    for i in data:
+        regions.append(i.json())
+    
+    with open('eve-cache/regions.json', 'w') as f:
+        json.dump(regions, f, indent=1)
+
+def get_system_station_info(size=None):
+    resp = requests.get(esi.uni_systems)
+    system_ids = resp.json()
+    
+    urls=[]
+    for i in system_ids:
+        urls.append(esi.uni_system_info.format(i))
+        
+    data = get_bulk_info(urls, size=size)
+    
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
+        else:
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+    
+    system_info=[]
+    urls=[]
+    for i in data:
+        system_info.append(i.json())
+        if 'stations' in list(i.json().keys()):
+            for j in i.json()['stations']:
+                urls.append(esi.uni_station_info.format(j))
+    
+    with open('eve-cache/systems.json', 'w') as f:
+        json.dump(system_info, f, indent=1)
+        
+    data = get_bulk_info(urls, size=size)
+    
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
+        else:
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+    
+    station_info=[]
+    for i in data:
+        station_info.append(i.json())
+    
+    with open('eve-cache/stations.json', 'w') as f:
+        json.dump(station_info, f, indent=1)
 
 #market data
 def list_active_orders():
     activeOrders=[]
-    with open('eve-cache/region_names.json', 'r') as f:
+    with open('eve-cache/regions.json', 'r') as f:
         regions = json.load(f)
-    for region in regions:
-        elem={}
-        resp = requests.get(esi.market_types.format(region['id'], 1))
+    
+    region_ids=[]
+    for i in regions:
+        if 'description' in list(i.keys()):
+            region_ids.append((i['region_id'], i['name']))
+    
+    for region in region_ids:
+        resp = requests.head(esi.market_types.format(region[0], 1))
         pages = int(resp.headers['X-pages'])
-        types = resp.json()
-        if pages > 1:
-            for i in range(2, pages+1):
-                resp = requests.get(esi.market_types.format(region['id'], i))
-                types = types+resp.json()
-        elem['name'] = region['name']
-        elem['id'] = region['id']
+        urls=[]
+        for i in range(1, pages+1):
+            urls.append(esi.market_types.format(region[0], i))
+        data = get_bulk_info(urls, size=100)
+        types=[]
+        for i in data:
+            types = types+i.json()
+        
+        elem = {}
+        elem['name'] = region[1]
+        elem['id'] = region[0]
         elem['orders'] = len(types)
         activeOrders.append(elem)
         
     for i in sorted(activeOrders, key=lambda j: j['orders'], reverse=True):
         if i['orders'] > 0:
             print("{:<10}{:<25}{}".format(i['id'], i['name'], i['orders']))
-        
+
 def market_orders(region, type_):
-    buy = requests.get(esi.market_orders.format(region, 'buy', 1, type_))
-    sell = requests.get(esi.market_orders.format(region, 'sell', 1, type_))
-    ids=[]
-    structs = []
-    for i in buy.json()+sell.json():
-        ids.append(i['system_id'])
-        if i['location_id'] <= 0xffffffff:
-            ids.append(i['location_id'])
-        else:
-            structs.append(i['location_id'])
-    ids = list(dict.fromkeys(ids))
-    ids = get_id_names(ids+[type_])
-    
-    structs = list(dict.fromkeys(structs))
-    structs = get_pos_info(structs)
-    
-    all_ = ids+structs
-    nbuy=[]
-    for i in buy.json():
-        for id_ in all_:
-            if i['type_id'] == id_['id']:
-                i['type_name'] = id_['name']
-            elif i['location_id'] == id_['id']:
-                i['location_name'] = id_['name']
-            elif i['system_id'] == id_['id']:
-                i['system_name'] = id_['name']
-        sortKey = sorted(i)
-        ndict = {}
-        for k in sortKey:
-            ndict[k] = i[k]
-        nbuy.append(ndict)
-    buy = sorted(nbuy, key=lambda k : k['price'], reverse=True)
-    nsell=[]
-    for i in sell.json():
-        for id_ in all_:
-            if i['type_id'] == id_['id']:
-                i['type_name'] = id_['name']
-            elif i['location_id'] == id_['id']:
-                i['location_name'] = id_['name']
-            elif i['system_id'] == id_['id']:
-                i['system_name'] = id_['name']
-        sortKey = sorted(i)
-        ndict = {}
-        for k in sortKey:
-            ndict[k] = i[k]
-        nsell.append(ndict)
-    sell = sorted(nsell, key=lambda k : k['price'], reverse=True)
-    cache(sell+buy, 'logs/market/'+str(region)+'/'+str(type_)+'.csv', as_csv=True)
+    if not os.path.exists('logs/market/'+str(region)):
+        os.makedirs('logs/market/'+str(region))
+        
+    data = requests.get(esi.market_orders.format(region, 'all', 1, type_))
+    data = data.json()
+    with open("eve-cache/market_types.json", "r") as f:
+        market_types = json.load(f)
+        
+    for i in market_types:
+        if i['type_id'] == type_:
+            name = i['name']
+            name = name.replace("/", "_")
+            name = name.replace(",", ";")
+            
+    if len(data) != 0:
+        with open('logs/market/'+str(region)+'/'+str(type_)+'_'+name+'.csv', 'w') as f:
+            f.write(','.join(list(data[0].keys()))+"\n")
+            for i in data:
+                ln=[]
+                for j in list(i.values()):
+                    ln.append(str(j))
+                f.write(','.join(list(ln))+"\n")
 
 def display(region, type_):
-    name = "logs/market/"+str(region)+"/"+str(type_)+".csv"
-    data = ETMlib.load_cache(name)
+    for i in os.listdir("logs/market/"+str(region)):
+        if str(type_) == i.split("_")[0]:
+            f_name = i
+            break
+        
+    name = "logs/market/"+str(region)+"/"+f_name
+    print(name)
+    data=[]
+    with open(name, 'r') as f:
+        for ln in f.readlines():
+            data.append(ln.strip("\n").split(','))
+            
+    with open('eve-cache/stations.json', 'r') as f:
+        stations = json.load(f)
+        
+    with open('eve-cache/structures.json', 'r') as f:
+        structures = json.load(f)
+        
+    with open('eve-cache/systems.json', 'r') as f:
+        systems = json.load(f)
+    
+    with open('eve-cache/regions.json', 'r') as f:
+        regions = json.load(f)
+        
+    for i in regions:
+        if i['region_id'] == region:
+            region_name = i['name']
+            
     header = data.pop(0)
+    header = header+['station_name', 'system_name']
+        
     buy = []
     sell = []
+    w1 = len(header[6])
+    w2 = len(header[12])
+    w3 = len(header[13])
     for i in data:
+        i.append('Unknown Structure/Station')
         if i[1] == 'True':
+            for j in structures:
+                if int(i[3]) == j['id']:
+                    i[12] = j['name']
+            for j in stations:
+                if int(i[3]) == j['station_id']:
+                    i[12] = j['name']
+            for j in systems:
+                if int(i[8]) == j['system_id']:
+                    i.append(j['name'])
             buy.append(i)
         else:
-            sell.append(i)    
+            for j in structures:
+                if int(i[3]) == j['id']:
+                    i[12] = j['name']
+            for j in stations:
+                if int(i[3]) == j['station_id']:
+                    i[12] = j['name']
+            for j in systems:
+                if int(i[8]) == j['system_id']:
+                    i.append(j['name'])
+            sell.append(i)
+        print(i)
+        if len(i[6]) > w1:
+            w1 = len("{:,.2f}".format(float(i[6])))
+        if len(i[12]) > w2:
+            w2 = len(i[12])
+        if len(i[13]) > w3:
+            w3 = len(i[13])
+    
+    sell = sorted(sell, key=lambda i: float(i[6]), reverse=True)
+    buy = sorted(buy, key=lambda i: float(i[6]), reverse=True)
     system=''
-    sp=bp=0
     while system != 'q':
-        print("{:^13}{:<12}{:<15}{:<13}{:<59}{}".format(header[1], header[7], header[12], header[10], header[4], header[8]))
+        best_sell = 1E16
+        best_buy = 0
+                
+        print(region_name, f_name)
+        print("{:^{w1}}  {:<{w2}} {:<{w3}} {}".format(header[6], header[12], header[13], header[7], w1=w1, w2=w2, w3=w3))
         for i in sell:
             if system == '':
-                print("{:^13}{:<12,}{:<15}{:<13}{:<59}{}".format(i[1], float(i[7]), i[12], i[10], i[4], i[8]))
-                sp = i[7]
-            elif i[10] == system:
-                print("{:^13}{:<12,}{:<15}{:<13}{:<59}{}".format(i[1], float(i[7]), i[12], i[10], i[4], i[8]))
-                sp = i[7]
-        print("-"*115)
-        for i in range(len(buy)-1, -1, -1):
-            if system == '':
-                bp = buy[i][7]
-            elif buy[i][10] == system:
-                bp = buy[i][7]
+                print("{:<{w1},.2f}   {:<{w2}} {:<{w3}} {}".format(float(i[6]), i[12], i[13], i[7], w1=w1, w2=w2, w3=w3))
+                if float(i[6]) < best_sell:
+                    best_sell = float(i[6])
+            elif system == i[13]:
+                print("{:<{w1},.2f}   {:<{w2}} {:<{w3}} {}".format(float(i[6]), i[12], i[13], i[7], w1=w1, w2=w2, w3=w3))
+                if float(i[6]) < best_sell:
+                    best_sell = float(i[6])
+
+        print("-"*(w1+w2+w3+6))
                 
-        for i in range(len(buy)):
+        for i in buy:
             if system == '':
-                print("{:^13}{:<12,}{:<15}{:<13}{:<59}{}".format(buy[i][1], float(buy[i][7]), buy[i][12], buy[i][10], buy[i][4], buy[i][8]))
-            elif buy[i][10] == system:
-                print("{:^13}{:<12,}{:<15}{:<13}{:<59}{}".format(buy[i][1], float(buy[i][7]), buy[i][12], buy[i][10], buy[i][4], buy[i][8]))
-        print("{:,} {:,} {:,}".format(float(sp), float(bp), (float(sp)-float(bp))))
+                print("{:<{w1},.2f}   {:<{w2}} {:<{w3}} {}".format(float(i[6]), i[12], i[13], i[7], w1=w1, w2=w2, w3=w3))
+                if float(i[6]) > best_buy:
+                    best_buy = float(i[6])
+            elif system == i[13]:
+                print("{:<{w1},.2f}   {:<{w2}} {:<{w3}} {}".format(float(i[6]), i[12], i[13], i[7], w1=w1, w2=w2, w3=w3))
+                if float(i[6]) > best_buy:
+                    best_buy = float(i[6])
+                    
+        print("Best sell:{:,}, Best buy:{:,}, Margin:{:,}".format(float(best_sell), float(best_buy), (float(best_sell)-float(best_buy))))
         system = input()
 
 def get_bulk_history(region, size=None):
-    resp = requests.get(esi.market_types.format(region, 1))
-    pages = int(resp.headers['X-pages'])
-    type_ids = resp.json()
-    if pages > 1:
-        for i in range(2, pages+1):
-            resp  = requests.get(esi.market_types.format(region, i))
-            type_ids = type_ids+resp.json()
-    print(len(type_ids), "types, continue?")
-    continue_ = input()
+    if not os.path.exists('logs/history/'+str(region)):
+        os.makedirs('logs/history/'+str(region))
+        
+    with open('eve-cache/market_types.json', 'r') as f:
+        market_types = json.load(f)
+        
+    type_ids = []
+    for i in market_types:
+        if i['published'] == True:
+            type_ids.append((i['name'], i['type_id']))
+            
+    urls = []
+    for i in type_ids:
+        urls.append(esi.market_history.format(region, i[1]))
     
-    if continue_ == 'y':
-        urls = []
-        for i in type_ids:
-            urls.append(esi.market_history.format(region, i))
-            
-        resp = get_bulk_info(urls, size=size)
-        
-        passed=[]
-        failed=[]
-        for r in resp:
-            if r.status_code == 200:
-                passed.append(r)
+    print("Downloading...", end="")
+    data = get_bulk_info(urls, size=size)
+    
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        try:
+            if data[ndx].status_code != 200:
+                failed.append(data[ndx])
+                del data[ndx]
             else:
-                print(r.status_code, r.reason)
-                failed.append(r)
-
-        retry = input("{} failed, try again? y/n ".format(len(failed)))
-        
-        while retry == 'y':
-            retry_resp = get_bulk_info([i.url for i in failed], size=size)
-            
-            passed=[]
-            failed=[]
-            for r in retry_resp:
-                if r.status_code == 200:
-                    passed.append(r)
-                else:
-                    print(r.status_code, r.reason)
-                    failed.append(r)
-                    
-            resp = resp+passed
-            retry = input("{} failed, try again? y/n ".format(len(failed)))
-        
-        with open("eve-cache/type_names.json", "r") as f:
-            type_names=json.load(f)
-            
-        name=""   
-        days=400.0
-        med_data=[]
-        errors=[]
-        for r in resp:
+                ndx += 1
+        except AttributeError:
+            print(data[ndx].exception)
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
+            else:
+                data.append(j)
+    print("Done")
+    name=""   
+    days=400.0
+    summary_data=[]
+    cnt=0
+    for r in data:
+        if len(r.json()) != 0:
+            print(cnt, end="\r")
+            cnt+=1
             id_ = r.url.split('=')[-1]
-            for i in type_names:
-                if i['id'] == int(id_):
-                    name = i['name']
+            for i in type_ids:
+                if i[1] == int(id_):
+                    name = i[0]
                     name = name.replace("/", "_")
                     name = name.replace(",", ";")
+                
             tot_average=0.0
             tot_highest=0.0
             tot_lowest=0.0
             tot_order_count=0.0
             tot_volume=0.0
-            if r.status_code == 200 and len(r.json()) != 0:
-                for i in r.json():
-                    tot_average = tot_average+i['average']
-                    tot_highest = tot_highest+i['highest']
-                    tot_lowest = tot_lowest+i['lowest']
-                    tot_order_count = tot_order_count+i['order_count']
-                    tot_volume = tot_volume+i['volume']
-                med_average = tot_average/days if tot_average != 0 else 0
-                med_highest = tot_highest/days if tot_highest != 0 else 0
-                med_lowest = tot_lowest/days if tot_lowest != 0 else 0
-                med_order_count = tot_order_count/days if tot_order_count != 0 else 0
-                med_volume = tot_volume/days if tot_volume != 0 else 0
-                med_data_e={'id':id_, 'med_average':med_average,
-                                'med_highest':med_highest,
-                                'med_lowest':med_lowest,
-                                'med_order_count':med_order_count,
-                                'med_volume':med_volume,
-                                'name': name}
-                med_data.append(med_data_e)
-                cache(r.json(), "logs/history/"+str(region)+"/"+id_+"_"+name+".csv")
-            elif r.status_code != 200:
-                print(id_, r.status_code)
-                errors.append(r)
+            for i in r.json():
+                tot_average = tot_average+i['average']
+                tot_highest = tot_highest+i['highest']
+                tot_lowest = tot_lowest+i['lowest']
+                tot_order_count = tot_order_count+i['order_count']
+                tot_volume = tot_volume+i['volume']
+            med_average = tot_average/days if tot_average != 0 else 0
+            med_highest = tot_highest/days if tot_highest != 0 else 0
+            med_lowest = tot_lowest/days if tot_lowest != 0 else 0
+            med_order_count = tot_order_count/days if tot_order_count != 0 else 0
+            med_volume = tot_volume/days if tot_volume != 0 else 0
+            med_data_e={'id':id_, 
+                        'name': name,
+                        'med_average':str(med_average),
+                        'med_highest':str(med_highest),
+                        'med_lowest':str(med_lowest),
+                        'med_order_count':str(med_order_count),
+                        'med_volume':str(med_volume)}
+            summary_data.append(med_data_e)
+            
+            pth = 'logs/history/'+str(region)+'/'+id_+"_"+name+".csv"
+            if os.path.exists(pth):
+                hist = []
+                with open(pth, 'r') as f:
+                    for l in f:
+                        hist.append(l.replace("\n", "").split(","))
+                
+                extra=[]
+                for j in r.json():
+                    in_ = False
+                    for k in hist:
+                        if j['date'] == k[1]:
+                            in_ == True
+                            break
+                    if in_ == False:
+                        l=[]
+                        for k in j.values():
+                            l.append(str(k))
+                        extra.append(l)
+                hist = hist+extra
+                with open(pth, 'w') as f:
+                    for j in hist:
+                        f.write(','.join(i)+"\n")
             else:
-                med_data_e={'id':id_, 'med_average':tot_average,
-                                'med_highest':tot_highest,
-                                'med_lowest':tot_lowest,
-                                'med_order_count':tot_order_count,
-                                'med_volume':tot_volume,
-                                'name': name}
-                med_data.append(med_data_e)
-                len0 = {'average':0,
-                        'date':0,
-                        'highest':0,
-                        'lowest':0,
-                        'order_count':0,
-                        'volume':0}
-                cache([len0], "logs/history/"+str(region)+"/"+id_+"_"+name+".csv")
-            print("", len(med_data), end="\r")
-        cache(med_data, "logs/history/"+str(region)+".csv")
-        print()
-        return errors
-    
+                with open(pth, 'w') as f:
+                    f.write(','.join(list(r.json()[0].keys()))+"\n")
+                    for j in r.json():
+                        ln = []
+                        for k in list(j.values()):
+                            ln.append(str(k))
+                        f.write(','.join(ln)+"\n")
+                
+    with open('logs/history/'+str(region)+".csv", 'w') as f:
+        f.write(','.join(list(summary_data[0].keys()))+"\n")
+        for j in summary_data:
+            f.write(','.join(list(j.values()))+"\n")
+
 def get_bulk_market(region, size=None):
+    strt = time.perf_counter()
     if not os.path.exists('logs/market/'+str(region)):
         os.makedirs('logs/market/'+str(region))
-    resp = requests.get(esi.market_types.format(region, 1))
-    pages = int(resp.headers['X-pages'])
-    type_ids = resp.json()
-    if pages > 1:
-        for i in range(2, pages+1):
-            resp  = requests.get(esi.market_types.format(region, i))
-            type_ids = type_ids+resp.json()
-    print(len(type_ids), "types, continue?")
-    cont = input()
-    
-    if cont == 'y':
-        urls = []
-        for i in type_ids:
-            urls.append(esi.market_orders.format(region, 'all', 1, i))
-        resp = get_bulk_info(urls, size=size)
-        
-        failed=[]
-        worked=[]
-        for i in range(len(resp)):
-            if resp[i].status_code != 200:
-                try:
-                    print(resp[i].json())
-                except:
-                    print(resp[i])
-                failed.append(resp[i])
-            else:
-                worked.append(resp[i])
-        resp=worked
-                
-                
-        cont2 = input('download, complete, {} failed, try again? y/n'.format(len(failed)))
-        while cont2 == 'y':
-            tmp_resp = get_bulk_info([i.url for i in failed], size=size)
-            
-            failed=[]
-            worked=[]
-            for i in range(len(tmp_resp)):
-                if tmp_resp[i].status_code != 200:
-                    try:
-                        print(tmp_resp[i].json())
-                    except:
-                        print(tmp_resp[i])
-                    failed.append(tmp_resp[i])
-                else:
-                    worked.append(tmp_resp[i])
-            resp=resp+worked
-            cont2 = input('{} failed, try again? y/n'.format(len(failed)))
-        
-        types = []
-        systems = []
-        locations = []
-        structs = []
-        print('>', len(resp))
-        for r in resp:
-            if len(r.json()) != 0 and r.status_code == 200:
-                type_ = r.url.split('=')[-1]
-                types.append(int(type_))
-                for order in r.json():
-                    systems.append(order['system_id'])
-                    if order['location_id'] <= 0xffffffff:
-                        locations.append(order['location_id'])
-                    else:
-                        structs.append(order['location_id'])
-                        
-        ids = list(dict.fromkeys(types+systems+locations))
-        nids=[]
-        if len(ids)>1000:
-            for i in range(0, len(ids), 1000):
-                nids = nids+get_id_names(ids[i:i+1000])
-        structs = list(dict.fromkeys(structs))
-        structs = get_pos_info(structs)
-        all_ = nids+structs
-        cnt=0
-        for r in resp:
-            type_ = r.url.split('=')[-1]
-            if len(r.json()) != 0:
-                buy=[]
-                sell=[]
-                for order in r.json():
-                    for id_ in all_:
-                        try:
-                            if order['type_id'] == id_['id']:
-                                order['type_name'] = id_['name']
-                            elif order['location_id'] == id_['id']:
-                                order['location_name'] = id_['name']
-                            elif order['system_id'] == id_['id']:
-                                order['system_name'] = id_['name']
-                        except:
-                            print("-", r.status_code, order, id_)
-                            
-                    if order['is_buy_order'] == True:
-                        buy.append(order)
-                    else:
-                        sell.append(order)
-                        
-                nbuy=[]
-                for i in buy:
-                    sortKey = sorted(i)
-                    ndict = {}
-                    for k in sortKey:
-                        ndict[k] = i[k]
-                    nbuy.append(ndict)
-                buy = sorted(nbuy, key=lambda k : k['price'], reverse=True)
-                nsell=[]
-                for i in sell:
-                    sortKey = sorted(i)
-                    ndict = {}
-                    for k in sortKey:
-                        ndict[k] = i[k]
-                    nsell.append(ndict)
-                sell = sorted(nsell, key=lambda k : k['price'], reverse=True)
-                cnt+=1
-                print('saving', cnt, end="\r")
-                cache(sell+buy, 'logs/market/'+str(region)+'/'+str(type_)+'.csv', as_csv=True)
-            else:
-                cnt+=1
-                print('saving', cnt, end="\r")
-                with open('logs/market/'+str(region)+'/'+str(type_)+'.csv', 'w') as f:
-                    f.write('duration,is_buy_order,issued,location_id,location_name,min_volume,order_id,price,range,system_id,system_name,type_id,type_name,volume_remain,volume_total')
-        print()
-        return failed
-                #input("-")
 
-def get_margins(region, station=None):
-    accounting = getSkill("logs/characters/96500260_skills.json", "Accounting", full=True)
-    Brokers_fee = getSkill("logs/characters/96500260_skills.json", "Broker Relations", full=True)
-    types = load_cache('eve-cache/type_names.json', as_list=False)
+    resp = requests.head(esi.market_types.format(region, 1))
+    pages = int(resp.headers['X-pages'])
+    urls=[]
+    for i in range(1, pages+1):
+        urls.append(esi.market_types.format(region, i))
+        
+    dl1strt = time.perf_counter()
+    data = get_bulk_info(urls, size=100)
+    dl1end = time.perf_counter()
+    dl1T = dl1end-dl1strt
+    print('dl1T:', dl1T)
     
-    csvs = os.listdir('logs/market/'+str(region))
-    volumes = load_cache('logs/history/'+str(region)+'.csv')
-    print(len(volumes), len(csvs))
-    header = ['type_id', 'name', 'best_sell', 'best_buy', 'margin', 'markup', 'med_order_count', 'med_volume']
-    all_margins=[]
-    all_margins.append(header)
-    for csv in csvs:
-        name = ''
-        med_order_count = ''
-        med_volume = ''
-        id_ = csv.split('.')[0]
-        print('', len(all_margins), end="\r")
-        margin=[]
-        data = load_cache('logs/market/'+str(region)+'/'+csv)
-        header = data.pop(0)
-        buy = []
-        sell = []
-        for i in data:
-            if i[1] == 'True':
-                buy.append(i)
-            else:
-                sell.append(i)
-        best_sell=0
-        best_buy=0
-        if station != None:
-            if len(sell) != 0:
-                for i in sell:
-                    if i[10] == station:
-                        best_sell = i[7]
-            else:
-                best_sell = 0
-            if len(buy) != 0:
-                for i in range(len(buy)-1, -1, -1):
-                    if buy[i][10] == station:
-                        best_buy = buy[i][7]
-            else:
-                best_buy = 0
+    type_ids = []
+    for i in data:
+        type_ids = type_ids+i.json()
+        
+    with open("eve-cache/market_types.json", "r") as f:
+        market_types = json.load(f)
+    
+    unpub=[]
+    type_names=[]
+    for i in market_types:
+        if i['published'] == False:
+            unpub.append(i['type_id']) 
         else:
-            if len(sell) != 0:
-                best_sell = sell[-1][7]
+            type_names.append((i['type_id'], i['name']))
+    
+    ndx=0
+    while ndx != len(type_ids):
+        if type_ids[ndx] in unpub:
+            del type_ids[ndx]
+        else:
+            ndx += 1
+    
+    urls=[]
+    for i in type_ids:
+        urls.append(esi.market_orders.format(region, 'all', 1, i))
+        
+    dl2strt = time.perf_counter()
+    data = get_bulk_info(urls, size=size)
+    dl2end = time.perf_counter()
+    dl2T = dl2end - dl2strt
+    print('dl2T:', dl2T)
+    
+    failed = []
+    ndx=0
+    while ndx != len(data):
+        if data[ndx].status_code != 200:
+            failed.append(data[ndx])
+            del data[ndx]
+        else:
+            ndx += 1
+    
+    while len(failed) > 0:
+        failed = []
+        retry = get_bulk_info(failed, size=size)
+        for j in retry:
+            if j.status_code != 200:
+                failed.append(j)
             else:
-                best_sell = 0
-            if len(buy) != 0:
-                best_buy = buy[0][7]
-            else:
-                best_buy = 0
-                
-        for v in range(1, len(volumes)):
-            if volumes[v][0] == id_:
-                med_order_count = volumes[v][4]
-                med_volume = volumes[v][5]
-                
-        for t in types:
-            if t['id'] == int(id_):
-                name = t['name']
+                data.append(j)
+        
+
+    for r in data:
+        type_ = r.url.split('=')[-1]
+        for i in type_names:
+            if i[0] == int(type_):
+                name = i[1]
                 name = name.replace("/", "_")
                 name = name.replace(",", ";")
+                
+        if len(r.json()) != 0:
+            with open('logs/market/'+str(region)+'/'+type_+'_'+name+'.csv', 'w') as f:
+                f.write(','.join(list(r.json()[0].keys()))+"\n")
+                for i in r.json():
+                    ln=[]
+                    for j in list(i.values()):
+                        ln.append(str(j))
+                    f.write(','.join(list(ln))+"\n")
+    stp = time.perf_counter()
+    
+    T = stp-strt
+    print('total Dl time:', dl1T+dl2T, 'total p time:', T - (dl1T+dl2T), "total", T)
+
+def get_margins(character, region, station=None):
+    strt = time.perf_counter()
+    log_file = "logs/characters/"+str(character)+"_skills.json"
+    Accounting = getSkill(log_file, "Accounting", full=True)
+    Brokers_fee = getSkill(log_file, "Broker Relations", full=True)
+    
+    csvs = os.listdir('logs/market/'+str(region))
+    volumes = []
+    with open('logs/history/'+str(region)+'.csv', 'r') as f:
+        for ln in f.readlines():
+            volumes.append(ln.strip("\n").split(","))
+            
+    with open("eve-cache/stations.json", "r") as f:
+        stations = json.load(f)
         
-        s_tax = sales_tax(best_sell, accounting)
-        b_sell_fee = brokers_fee(best_sell, Brokers_fee, 0, 0)
-        b_buy_fee = brokers_fee(best_buy, Brokers_fee, 0, 0)
-        m = (float(best_sell)-float(best_buy)) - (s_tax+b_sell_fee+b_buy_fee)
-        try:
+    with open("eve-cache/structures.json", "r") as f:
+        structures = json.load(f)
+    
+    stations = stations+structures
+    if station != None:
+        station_ids=[]
+        for i in stations:
+            for j in station.split(','):
+                if j in i['name']:
+                    if 'station_id' in i.keys():
+                        station_ids.append(i['station_id'])
+                    else:
+                        station_ids.append(i['id'])
+            
+    all_margins=[]
+    cnt=0
+    for csv in csvs:
+        id_name = csv.replace(".csv", "").split("_", 1)
+        id_ = id_name[0]
+        name = id_name[1]
+        med_order_count = 0
+        med_volume = 0
+        for v in range(1, len(volumes)):
+            if volumes[v][0] == id_:
+                med_order_count = float(volumes[v][5])
+                med_volume = float(volumes[v][6])
+        
+        print(cnt, end='\r')
+        cnt+=1
+        best_sell = 1E16
+        best_buy = 0
+        if station != None:
+            with open('logs/market/'+str(region)+'/'+csv) as f:
+                f.readline()
+                for ln in f.readlines():
+                    ln = ln.strip("\n").split(',')
+                    if int(ln[3]) in station_ids:
+                        price = float(ln[6])
+                        if ln[1] == 'True' and price > best_buy:
+                            best_buy = price
+                        elif ln[1] == 'False' and price < best_sell:
+                            best_sell = price
+        else:
+            with open('logs/market/'+str(region)+'/'+csv) as f:
+                f.readline()
+                for ln in f.readlines():
+                    ln = ln.strip("\n").split(',')
+                    price = float(ln[6])
+                    if ln[1] == 'True' and price > best_buy:
+                        best_buy = price
+                    elif ln[1] == 'False' and price < best_sell:
+                        best_sell = price
+        
+        
+        base_sell_relist = relist(best_sell, best_sell, Brokers_fee, Accounting, 0, 0)
+        best_sell_tax = sales_tax(best_sell, Accounting)
+        best_sell_tax = best_sell_tax + brokers_fee(best_sell, Brokers_fee, 0, 0)
+
+        base_buy_relist = relist(best_buy, best_buy, Brokers_fee, Accounting, 0, 0)
+        best_buy_tax = brokers_fee(best_buy, Brokers_fee, 0, 0)
+
+        margin = float(best_sell)-float(best_buy)
+        markup = 'inf'
+        if best_buy != 0:
             markup = ((float(best_sell)-float(best_buy))/float(best_buy))*100
-        except ZeroDivisionError:
-            markup = 0
-        margin = [id_, name, best_sell, best_buy, m, markup, med_order_count, med_volume]
-        all_margins.append(margin)
+
+        margin_ = [id_,
+                name,
+                best_buy,
+                best_buy_tax,
+                base_buy_relist,
+                best_sell,
+                best_sell_tax,
+                base_sell_relist,
+                margin,
+                markup,
+                med_order_count,
+                med_volume]
+        
+        all_margins.append(margin_)
     print()
+    header = [['id_',
+               'name',
+               'best_buy',
+               'best_buy_tax',
+               'base_buy_relist',
+               'best_sell',
+               'best_sell_tax',
+               'base_sell_relist',
+               'margin',
+               'markup',
+               'med_order_count',
+               'med_volume']]
+    all_margins = header+all_margins
     with open('logs/market/'+str(region)+'_margins.csv', 'w') as f:
         for line in all_margins:
             l=[]
             for i in line:
                 l.append(str(i))
             f.write(','.join(l)+"\n")
+    stp = time.perf_counter()
+    print("total", stp-strt)
 
+def get_trade_routes(regiona, regionb):
+    strt = time.perf_counter()
+    regionacsv = os.listdir('logs/market/'+str(regiona))
+    regionbcsv = os.listdir('logs/market/'+str(regionb))
+    with open('eve-cache/market_types.json', 'r') as f:
+        market_types = json.load(f)
+    
+    volumes = []
+    for i in market_types:
+        volumes.append((i['name'], i['packaged_volume']))
+        
+    with open('eve-cache/regions.json', 'r') as f:
+        regions = json.load(f)
+    
+    for r in regions:
+        if r['region_id'] == regiona:
+            regiona_name = r['name']
+        if r['region_id'] == regionb:
+            regionb_name = r['name']
+    
+    header = ['name',
+                'buy_from',
+                'sell_to',
+                'buy_quantity',
+                'buy_volume',
+                'buy_range_high',
+                'buy_range_low',
+                'purchase_cost',
+                'sell_quantity',
+                'sell_volume',
+                'sell_range_high',
+                'sell_range_low',
+                'sell_value',
+                'profit']
+    routes = [header]
+    cnt = 0
+    for regA in regionacsv:
+        for regB in regionbcsv:
+            if regA == regB:
+                cnt += 1
+                print(cnt, end="\r")
+                id_name = regA.replace('.csv', '').split('_')
+                unit_volume = 0
+                for i in volumes:
+                    if i[0] == id_name[1]:
+                        unit_volume = float(i[1])
+                
+                Asell =[]
+                Abuy = []
+                Absell = 1E16
+                Abbuy = 0
+                with open('logs/market/'+str(regiona)+'/'+regA, 'r') as f:
+                    f.readline()
+                    for ln in f.readlines():
+                        order = ln.strip("\n").split(',')
+                        if len(order) > 0:
+                            if order[1] == "True":
+                                Abuy.append(order)
+                                if float(order[6]) > Abbuy:
+                                    Abbuy = float(order[6])
+                            else:
+                                Asell.append(order)
+                                if float(order[6]) < Absell:
+                                    Absell = float(order[6])
+                
+                Bsell = []
+                Bbuy = []
+                Bbsell = 1E16
+                Bbbuy = 0
+                with open('logs/market/'+str(regionb)+'/'+regB, 'r') as f:
+                    f.readline()
+                    for ln in f.readlines():
+                        order = ln.strip("\n").split(',')
+                        if len(order) > 0:
+                            if order[1] == "True":
+                                Bbuy.append(order)
+                                if float(order[6]) > Bbbuy:
+                                    Bbbuy = float(order[6])
+                            else:
+                                Bsell.append(order)
+                                if float(order[6]) < Bbsell:
+                                    Bbsell = float(order[6])
+                
+                overlap = False
+                
+                buy_quantity = 0
+                buy_volume = 0
+                buy_range_high = 0
+                buy_range_low = 1E16
+                purchase_cost = 0
+                
+                sell_quantity = 0
+                sell_volume = 0
+                sell_range_high = 0
+                sell_range_low = 1E16
+                sell_value = 0
+                profit = 0
+                
+                if Absell < Bbbuy:
+                    overlap = True
+                    buy_from = regiona_name
+                    sell_to = regionb_name
+                    for i in Asell:
+                        if float(i[6]) < Bbbuy:
+                            buy_quantity = buy_quantity + int(i[10])
+                            purchase_cost = purchase_cost + (float(i[6]) * float(i[10]))
+                            if float(i[6]) > buy_range_high:
+                                buy_range_high = float(i[6])
+                            if float(i[6]) < buy_range_low:
+                                buy_range_low = float(i[6])
+                    
+                    buy_volume = buy_quantity * unit_volume    
+                    for i in Bbuy:
+                        if float(i[6]) > Absell:
+                            sell_quantity = sell_quantity + int(i[10])
+                            sell_value = sell_value + (float(i[6]) * float(i[10]))
+                            if float(i[6]) > sell_range_high:
+                                sell_range_high = float(i[6])
+                            if float(i[6]) < sell_range_low:
+                                sell_range_low = float(i[6])
+                            
+                    sell_volume = sell_quantity * unit_volume
+                    profit = sell_value - purchase_cost
+                elif Bbsell < Abbuy:
+                    overlap = True
+                    buy_from = regionb_name
+                    sell_to = regiona_name
+                    for i in Bsell:
+                        if float(i[6]) < Abbuy:
+                            buy_quantity = buy_quantity + int(i[10])
+                            purchase_cost = purchase_cost + (float(i[6]) * float(i[10]))
+                            if float(i[6]) > buy_range_high:
+                                buy_range_high = float(i[6])
+                            if float(i[6]) < buy_range_low:
+                                buy_range_low = float(i[6])
+                    
+                    buy_volume = buy_quantity * unit_volume 
+                    for i in Abuy:
+                        if float(i[6]) > Bbsell:
+                            sell_quantity = sell_quantity + int(i[10])
+                            sell_value = sell_value + (float(i[6]) * float(i[10]))
+                            if float(i[6]) > sell_range_high:
+                                sell_range_high = float(i[6])
+                            if float(i[6]) < sell_range_low:
+                                sell_range_low = float(i[6])
+                            
+                    sell_volume = sell_quantity * unit_volume
+                    profit = sell_value - purchase_cost
+                
+                if overlap == True:
+                    route = [id_name[1],
+                            buy_from,
+                            sell_to,
+                            buy_quantity,
+                            buy_volume,
+                            buy_range_high,
+                            buy_range_low,
+                            purchase_cost,
+                            sell_quantity,
+                            sell_volume,
+                            sell_range_high,
+                            sell_range_low,
+                            sell_value,
+                            profit]
+                    routes.append(route)
+    stp = time.perf_counter()
+    print("total", stp-strt)
+    
+    with open('logs/market/'+str(regiona)+'_'+str(regionb)+'.csv', 'w') as f:
+        for ln in routes:
+            l = []
+            for i in ln:
+                l.append(str(i))
+            f.write(','.join(l)+"\n")
+        
 #tax functions
 def sales_tax(price, accounting):
     base_sTax=8
@@ -948,3 +1332,54 @@ def relist(start_price, mod_price, bRelations, ABRelations, faction_stand, corp_
     current_discount=(base_discount+(increase_rate*ABRelations))/100
     br = lambda p : brokers_fee(p, bRelations, faction_stand, corp_stand)
     return max(0, br(mod_price-start_price))+(1-current_discount)*br(mod_price)
+
+#tmp functions
+def summary(character_id):
+    print("Updating Transactions")
+    get_character_transactions()
+    print("Updating Orders")
+    get_character_orders()
+    print("Updating Assets")
+    get_character_assets()
+    print("Updating Balance")
+    get_character_balance()
+    
+    root = 'logs/characters/'
+    with open(root+str(character_id)+'_assets.json', 'r') as f:
+        assets = json.load(f)
+    with open(root+str(character_id)+'_orders.json', 'r') as f:
+        orders = json.load(f)
+    balances = []
+    with open(root+str(character_id)+'_balance', 'r') as f:
+        for ln in f.readlines():
+            balances.append(float(ln.strip("\n").split(',')[1]))
+        
+    totBuyOrders = 0
+    buyOrders = 0
+    totSellOrders = 0
+    sellOrders = 0
+    for i in orders:
+        if 'is_buy_order' in i.keys():
+            if i['is_buy_order'] == True:
+                buyOrders += 1
+                totBuyOrders = totBuyOrders + (i['price']*i['volume_remain'])
+        else:
+            sellOrders += 1
+            totSellOrders = totSellOrders + (i['price']*i['volume_remain'])
+    
+    totAssets = 0
+    Assets = 0
+    for i in assets:
+        Assets += 1
+        totAssets = totAssets + (i['asset_price']*i['quantity'])
+        
+    print("Buy Orders: {}, Value: {:,.2f}".format(buyOrders, totBuyOrders))
+    print("Sell Orders: {}, Value: {:,.2f}".format(sellOrders, totSellOrders))
+    print("Assets: {}, Value: {:,.2f}".format(Assets, totAssets))
+    print("Wallet Balance: {:,.2f}".format(balances[-1]))
+    print("Balance change: {:,.2f}".format(balances[-1] - balances[-2]))
+    print("Total: {:,.2f}".format(totBuyOrders+totSellOrders+totAssets+balances[-1]))
+    
+
+if __name__ == '__main__':
+    summary(96500260)
