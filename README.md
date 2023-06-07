@@ -63,6 +63,7 @@ ETMlib.get_character_balance()
 ETMlib.ledger(character_id)
 
 #market data
+
 #list your active orders
 
 ETMlib.list_active_orders()
@@ -72,6 +73,7 @@ ETMlib.list_active_orders()
 ETMlib.market_orders(region, type_)
 
 #simple text display
+
 ETMlib.display(region, type_)
 
 #download bulk history for region
